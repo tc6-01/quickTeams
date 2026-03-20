@@ -1,2 +1,31 @@
+# Local OMC/Claude runtime state
 .omc/
+.claude/settings.local.json
+.claude/settings.json
+.claude.json
+
+# SpecStory local artifacts
+.specstory/history/
+.specstory/ai_rules_backups/
+.specstory/.project.json
+
+# Logs and temporary files
+*.log
+*.log.*
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# macOS / editor noise
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+
+# Common local env files
+.env
+.env.*
+!.env.example

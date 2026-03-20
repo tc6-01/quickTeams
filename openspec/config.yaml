@@ -1,20 +1,25 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Project: quickTeams
+  Purpose: Share reusable Claude Code and OpenSpec workflows so teammates can propose,
+    design, and implement changes with a documented happy path.
+  Key assets:
+    - .claude/commands/opsx/*: slash-command entrypoints for OpenSpec workflows
+    - .claude/skills/openspec-*: reusable skill definitions
+    - openspec/changes/reliable-agent-team-workflow/*: demo change showing expected artifacts
+    - .spec-workflow/*: optional template assets for richer spec workflows
+  Assumptions:
+    - OpenSpec CLI must be installed for opsx/openspec workflows to work
+    - GitHub CLI is optional and only needed for remote repo / PR workflows
+  Sharing boundary:
+    - Keep generated artifacts repository-shareable; do not reference local machine paths,
+      personal session state, chat-history files, or secrets.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - Keep the proposal focused on why the change matters and which capabilities it adds or modifies.
+  design:
+    - Prefer practical implementation decisions over abstract architecture discussion.
+  tasks:
+    - Break work into small, verifiable steps that a new contributor can follow.
