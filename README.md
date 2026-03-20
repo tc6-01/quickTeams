@@ -116,9 +116,11 @@ openspec status --change "reliable-agent-team-workflow"
 - `docs/installation.md`
 - `docs/usage.md`
 - `docs/demo-workflow.md`
+- `docs/architecture.md`
 - `docs/troubleshooting.md`
 
 如果你想最快确认这套仓库是不是适合你，优先看 `docs/demo-workflow.md`。
+如果你想理解各目录为什么存在、主线应该看哪里，读 `docs/architecture.md`。
 
 ## 当前定位
 
