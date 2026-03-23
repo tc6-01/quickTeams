@@ -1,0 +1,36 @@
+name: verify
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install OpenSpec CLI
+        run: npm install -g openspec
+
+      - name: Make scripts executable
+        run: chmod +x scripts/bootstrap.sh scripts/verify.sh scripts/doctor.sh
+
+      - name: Run bootstrap checks
+        run: ./scripts/bootstrap.sh
+
+      - name: Run verify checks
+        run: ./scripts/verify.sh
+
+      - name: Run doctor diagnostics
+        run: ./scripts/doctor.sh
