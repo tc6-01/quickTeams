@@ -1,35 +1,46 @@
 ## 1. Workflow Entry and State Model
 
-- [ ] 1.1 定义 workflow registry 与模板结构，支持按名称加载标准化 team workflow
-- [ ] 1.2 实现统一 workflow 入口命令，创建新的 team run 并初始化运行上下文
-- [ ] 1.3 定义 durable run state 与 checkpoint 数据结构，覆盖当前阶段、参与 agent、完成阶段和 pending events
-- [ ] 1.4 实现 stage engine 的基础状态迁移接口，支持阶段启动、完成、失败和切换
+- [ ] 1.1 实现 `db.py`：创建所有 SQLite 表、WAL 模式、迁移框架
+- [ ] 1.2 实现 `workflow.py`：YAML 模板加载器，支持 `load()` 和 `list()`
+- [ ] 1.3 创建 `workflows/reliable-agent-team-workflow.yaml` 示例模板
+- [ ] 1.4 实现 `scripts/heartbeat.py`、`scripts/outbox_write.py`、`scripts/checkpoint_save.py`
+- [ ] 1.5 验证：Claude Code 能正常读写 SQLite，workflow 模板能被解析
 
 ## 2. Reliable Completion Delivery
 
-- [ ] 2.1 实现 worker completion outbox store，支持 append、mark dispatched、mark acked、fetch pending 和 move to dead letter
-- [ ] 2.2 实现 completion event 的显式 ACK 机制，确保只有 ACK 后才允许阶段推进
-- [ ] 2.3 实现基于 event identifier 的幂等消费保护，避免 retry/replay 产生重复副作用
-- [ ] 2.4 实现 delivery coordinator，支持有界退避重试和 lead 恢复后的 pending event replay
+- [ ] 2.1 实现 `outbox.py`：append、fetch_pending、mark_dispatched、mark_acked、mark_dead_letter
+- [ ] 2.2 实现幂等保护：基于 `event_id` 的唯一约束 + 去重查询
+- [ ] 2.3 实现 delivery coordinator：支持有界退避重试
+- [ ] 2.4 验证：并发写入不丢失、重复投递不产生双副作用
 
 ## 3. Lead Health, Hang Detection, and Recovery
 
-- [ ] 3.1 实现 lead lease/heartbeat manager，维护 `HEALTHY`、`SUSPECTED_SLEEP` 和 `UNAVAILABLE` 状态转换
-- [ ] 3.2 实现 team watchdog，扫描长时间无进展的 team run 并触发 reconciliation
-- [ ] 3.3 实现 reconciler，对比 runtime state、checkpoint 和 outbox 状态并执行 replay、resume 或 repair
-- [ ] 3.4 实现 recovery policy，支持 wake、restart 或 handoff 等恢复动作及触发条件
-- [ ] 3.5 实现 dead-letter handling，记录无法自动恢复的 event/run 与可操作诊断信息
+- [ ] 3.1 实现 `lease.py`：acquire、renew、transition_to、expire 检测
+- [ ] 3.2 实现 `watchdog.py`：定时扫描 stale runs 和 stale leases
+- [ ] 3.3 验证：Lead 断连后能在 `STALE_THRESHOLD` 秒内被标记为 SUSPECTED_SLEEP
+- [ ] 3.4 实现 `audit.py`：审计日志
 
-## 4. Hooks and Observability
+## 4. Reconciliation and Recovery
 
-- [ ] 4.1 定义 workflow lifecycle hooks，覆盖 pre-run、post-stage、worker-done、lead-idle、tick 和 exit 等关键时机
-- [ ] 4.2 实现 hook 与 runtime/reliability 的边界，确保 hook 只做守卫、注入和触发，不承担真实状态
-- [ ] 4.3 为 retry、replay、lease transition、recovery 和 dead-letter 补充结构化日志与审计记录
-- [ ] 4.4 增加关键指标输出，覆盖 event delivery、retry、hang detection、recovery success 和 dlq inflow
+- [ ] 4.1 实现 `checkpoint.py`：save、load_latest、load_at
+- [ ] 4.2 实现 `reconciler.py`：decide_recovery_action、replay_pending、resume_from_checkpoint
+- [ ] 4.3 实现 `deadletter.py`：DLQ 入队和诊断信息
+- [ ] 4.4 实现 recovery policy：RESUME / REPLAY / REPAIR / WAKED / HANDOFF / DEAD 决策
+- [ ] 4.5 验证：
+  - [ ] Lead 休眠后能自动 RESUME
+  - [ ] 有未 ACK 事件时能 REPLAY
+  - [ ] 超过最大重试次数移入 DLQ
 
-## 5. Verification
+## 5. Sidecar Process and Integration
 
-- [ ] 5.1 为 outbox、ACK、idempotency、lease transition 和 stage engine 编写单元测试
-- [ ] 5.2 增加集成测试，覆盖 lead 休眠、worker 完成事件积压、恢复后 replay 和 workflow resume
-- [ ] 5.3 增加端到端验证，覆盖统一 workflow 入口启动、阶段推进、hang 检测与自动恢复
-- [ ] 5.4 运行 openspec 校验与最终状态检查，确保 proposal、design、specs、tasks 全部可用于 apply
+- [ ] 5.1 实现 `sidecar/main.py`：Sidecar 入口，支持 `sidecar run`
+- [ ] 5.2 实现 `scripts/sidecarctl`：Sidecar 进程管理（start/stop/status）
+- [ ] 5.3 实现文件 mtime 轮询通知机制（SQLite 变化检测）
+- [ ] 5.4 验证：Sidecar 能正确检测 SQLite 变化并触发相应逻辑
+
+## 6. Verification
+
+- [ ] 6.1 为 outbox、ACK、idempotency、lease transition 编写单元测试
+- [ ] 6.2 增加集成测试：lead 休眠、worker 完成事件积压、恢复后 replay 和 workflow resume
+- [ ] 6.3 增加端到端验证：统一 workflow 入口启动、阶段推进、hang 检测与自动恢复
+- [ ] 6.4 运行 openspec 校验与最终状态检查

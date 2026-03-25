@@ -1,130 +1,212 @@
 # quickTeams
 
-quickTeams 是一个面向 Claude Code + OpenSpec 的共享工作流仓库。
+**解决 Claude Code team 的 lead 卡住问题 — 让 agent team 可靠执行、自动恢复。**
 
-它把常用的变更流程入口放进仓库本身，方便团队成员在同一个项目目录里复用：
-- `/opsx:explore`：先探索需求和方向
-- `/opsx:propose`：一键生成 proposal / design / specs / tasks
-- `/opsx:apply`：按 tasks 实施变更
-- `/opsx:archive`：归档已经完成的 change
+当 lead agent 因休眠/断连而卡住时，整个 team 陷入死锁：worker 完成了任务但无法通知 lead，其他 agent 等待 lead 的下一步指令。quickTeams 通过 Sidecar 架构，在不修改 Claude Code 的前提下，为 team 提供可靠执行能力。
 
-这个仓库不是传统应用源码仓库，更像一个“可共享的 AI 工作流骨架”。它的重点是：
-- 让团队成员用同一套命令推进 OpenSpec 变更
-- 让 proposal -> design -> tasks -> apply 这条链路可复用
-- 把 demo change 和模板一起放进版本库，方便新人快速上手
+## 核心问题
 
-## 适合谁
-
-- 正在使用 Claude Code 的个人或团队
-- 想把 OpenSpec 流程固化到仓库里的人
-- 想要一个可复用的 change proposal / implementation workflow 骨架的人
-
-## 前置依赖
-
-必需：
-- `git`
-- `openspec` CLI
-- Claude Code（用于识别仓库内 `.claude/commands` 和 `.claude/skills`）
-
-可选：
-- `gh`（只在你需要 GitHub 仓库、PR、远程操作时才需要）
-
-你可以先确认：
-
-```bash
-openspec --version
-git --version
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Claude Code Team                                           │
+│                                                              │
+│  Lead ──────────────────► Workers                            │
+│    │                          │                             │
+│    │   "执行任务..."           │   "任务完成"               │
+│    │                          │                            │
+│    ◄──────────────────────────┘                            │
+│                                                              │
+│  问题：Lead 休眠 → 事件丢失 → Team 死锁                     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## 解决方案
 
-1. 克隆仓库
+quickTeams 采用 **Sidecar 进程模式**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Claude Code（Lead + Workers）                               │
+│                                                              │
+│  按 workflow 模板执行                                         │
+│  只操作共享 SQLite（写事件、写 checkpoint）                   │
+│  不感知 Sidecar 存在                                        │
+└─────────────────────────────────────────────────────────────┘
+                            │ 共享 SQLite
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Sidecar 进程（独立运行）                                    │
+│                                                              │
+│  ┌─────────┐  ┌──────────┐  ┌────────────┐              │
+│  │ Outbox  │  │  Lease   │  │  Watchdog  │              │
+│  │ Store   │  │ Manager  │  │ + Reconc.  │              │
+│  └─────────┘  └──────────┘  └────────────┘              │
+│                                                              │
+│  • 事件先持久化再投递                                        │
+│  • Lead lease 检测休眠                                       │
+│  • 自动恢复卡死的 workflow                                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| **Dutable Outbox** | worker 完成事件先写入 SQLite，再投递；ACK 才推进阶段 |
+| **幂等消费** | 基于 `eventId` 去重，重复投递不产生重复副作用 |
+| **Lead Lease** | 检测 lead 健康状态：HEALTHY → SUSPECTED_SLEEP → UNAVAILABLE |
+| **Watchdog** | 扫描无进展的 run，自动触发 reconciliation |
+| **Checkpoint** | 阶段边界保存快照，支持从任意一致状态恢复 |
+| **Workflow 模板** | YAML 格式定义 stages、roles、success criteria、failure policy |
+
+## 快速开始
+
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/tc6-01/quickTeams.git
 cd quickTeams
 ```
 
-2. 运行初始化检查
+### 2. 初始化检查
 
 ```bash
 ./scripts/bootstrap.sh
 ```
 
-3. 运行只读验证
+### 3. 启动 Sidecar
 
 ```bash
-./scripts/verify.sh
+./scripts/sidecarctl start
 ```
 
-4. 在 Claude Code 中打开这个仓库目录，然后使用：
+### 4. 运行 workflow
 
-```text
-/opsx:propose add-something
+在 Claude Code 中：
+
+```
+/team-run reliable-agent-team-workflow
 ```
 
-或者直接查看 demo change：
+## 目录结构
 
-```bash
-openspec status --change "reliable-agent-team-workflow"
+```
+quickTeams/
+├── sidecar/                    # Sidecar 实现（Python）
+│   ├── main.py                 # 入口
+│   ├── db.py                  # SQLite 连接和迁移
+│   ├── outbox.py              # Outbox store
+│   ├── lease.py               # Lease / heartbeat
+│   ├── watchdog.py            # Watchdog timer
+│   ├── reconciler.py          # 恢复决策
+│   └── checkpoint.py          # Checkpoint store
+│
+├── scripts/                    # Claude Code 可调用脚本
+│   ├── sidecarctl             # Sidecar 控制（start/stop/status）
+│   ├── heartbeat.py           # 更新 lease
+│   ├── outbox_write.py         # 写入完成事件
+│   └── checkpoint_save.py      # 保存 checkpoint
+│
+├── workflows/                  # Workflow 模板
+│   └── reliable-agent-team-workflow.yaml
+│
+├── openspec/                   # OpenSpec 变更管理
+│   └── changes/reliable-agent-team-workflow/
+│       ├── proposal.md         # 问题定义
+│       ├── design.md           # 设计决策
+│       ├── ARCHITECTURE.md     # 架构设计
+│       └── tasks.md            # 实现任务
+│
+└── docs/
+    └── sidecar-arch.md         # 架构详解
 ```
 
-## 最小 Happy Path
+## 工作原理
 
-如果你只想确认“这个仓库能不能用”，按下面顺序走：
+### 1. Workflow 启动
 
-1. `./scripts/bootstrap.sh`
-2. `./scripts/verify.sh`
-3. `openspec status --change "reliable-agent-team-workflow"`
-4. 在 Claude Code 中尝试 `/opsx:propose <your-change>`
+1. Lead 从 SQLite 加载 workflow 模板
+2. 初始化 run state 和 lease
+3. 按 stage 顺序执行
 
-## 仓库结构
+### 2. Worker 完成事件
 
-- `.claude/commands/opsx/`：仓库级 slash commands
-- `.claude/skills/openspec-*`：可复用 skill 定义
-- `openspec/config.yaml`：OpenSpec 项目配置
-- `openspec/changes/reliable-agent-team-workflow/`：完整 demo change
-- `.spec-workflow/`：额外的模板资产和历史试验内容
-- `scripts/`：bootstrap / verify 脚本
-- `docs/`：安装、使用、排障文档
+```
+Worker 完成 → 写入 outbox (PENDING)
+                    │
+                    ├── Sidecar 检测到 PENDING
+                    │        │
+                    │        └── 标记 DISPATCHED
+                    │
+                    └── Lead 读取 → 处理 → ACK
+```
 
-## 共享边界
+### 3. Lead 休眠检测
 
-这个仓库会提交“可共享的工作流资产”，但不会提交你的本地运行状态。
+```
+Watchdog 扫描 leases 表
+    │
+    ├── last_heartbeat 超时 → SUSPECTED_SLEEP
+    │
+    └── 超过 recovery_timeout → UNAVAILABLE
+                                  │
+                                  └── 触发 reconcile
+```
 
-已明确视为本地状态、不会纳入版本控制的内容包括：
-- `.omc/`
-- `.claude/settings.json`
-- `.claude/settings.local.json`
-- `.claude.json`
-- `.env*`
-- 日志、临时文件、系统垃圾文件
+### 4. 自动恢复
 
-如果你在使用过程中生成了新的本地状态文件，先检查 `.gitignore`，再决定是否应该提交。
+```
+reconcile 检查：
+    │
+    ├── checkpoint 存在 → RESUME from checkpoint
+    │
+    ├── 有未 ACK 事件 → REPLAY outbox
+    │
+    └── 无法恢复 → DEAD / DLQ
+```
 
-## Demo Change
+## Workflow 模板格式
 
-仓库自带一个完整样例：
-- `openspec/changes/reliable-agent-team-workflow/proposal.md`
-- `openspec/changes/reliable-agent-team-workflow/design.md`
-- `openspec/changes/reliable-agent-team-workflow/tasks.md`
+```yaml
+name: reliable-agent-team-workflow
+version: "1.0"
 
-这个 change 展示了如何围绕“agent team 的可靠执行与标准 workflow”构建完整 OpenSpec 工件。
+settings:
+  hang_timeout: 300      # 阶段无进展超时（秒）
+  heartbeat_ttl: 30      # Lease TTL（秒）
+
+stages:
+  - id: stage_1_planning
+    name: Planning
+    owner: lead
+    instructions: |
+      分析任务需求，制定执行计划。
+    success_criteria:
+      - plan_document_created: true
+    failure_policy:
+      action: retry
+      max_attempts: 3
+    next:
+      - stage_2_dispatch
+
+roles:
+  lead:
+    description: 主协调 agent
+  executor:
+    description: 执行 agent
+```
+
+## 前置依赖
+
+| 依赖 | 说明 |
+|------|------|
+| Python 3.10+ | Sidecar 实现 |
+| SQLite3 | 共享存储（内置于 Python） |
+| Claude Code | team 执行环境 |
 
 ## 进一步阅读
 
-- `docs/installation.md`
-- `docs/usage.md`
-- `docs/demo-workflow.md`
-- `docs/architecture.md`
-- `docs/troubleshooting.md`
-
-如果你想最快确认这套仓库是不是适合你，优先看 `docs/demo-workflow.md`。
-如果你想理解各目录为什么存在、主线应该看哪里，读 `docs/architecture.md`。
-
-## 当前定位
-
-这是一个 MVP 级共享仓库：
-- 已具备基本的说明、检查和验证路径
-- 适合团队内部共享和二次定制
-- 暂未覆盖自动安装依赖、交互式初始化、CI 验证等增强能力
+- [架构设计](openspec/changes/reliable-agent-team-workflow/ARCHITECTURE.md) — 完整 Sidecar 技术方案
+- [问题定义](openspec/changes/reliable-agent-team-workflow/proposal.md) — 为什么需要这个
+- [设计决策](openspec/changes/reliable-agent-team-workflow/design.md) — 关键决策记录
+- [实现任务](openspec/changes/reliable-agent-team-workflow/tasks.md) — 待开发任务清单

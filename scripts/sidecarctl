@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Sidecar process control script."""
+
+import sys
+import os
+import signal
+import time
+import subprocess
+
+sys.path.insert(0, "/Users/roubaojiasudu/Desktop/code AI/repo/quickTeams")
+
+from sidecar.config import SHARED_DB_PATH
+
+PID_FILE = os.path.expanduser("~/.quickteams/sidecar.pid")
+LOG_FILE = os.path.expanduser("~/.quickteams/sidecar.log")
+
+
+def get_pid():
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE) as f:
+            return int(f.read().strip())
+    return None
+
+
+def is_running(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def start():
+    pid = get_pid()
+    if pid and is_running(pid):
+        print(f"Sidecar already running (PID {pid})")
+        return
+
+    os.makedirs(os.path.dirname(PID_FILE), exist_ok=True)
+    with open(LOG_FILE, "a") as log:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", """
+import sys
+sys.path.insert(0, '/Users/roubaojiasudu/Desktop/code AI/repo/quickTeams')
+from sidecar.db import run_migrations
+from sidecar.watchdog import Watchdog
+from sidecar.reconciler import reconciler
+
+run_migrations()
+print('Sidecar started, watchdog active', file=open('/dev/stderr', 'w'))
+wd = Watchdog(on_reconcile=lambda r: reconciler.reconcile(r))
+wd.start()
+import time
+while True:
+    time.sleep(86400)
+"""],
+            stdout=log, stderr=subprocess.STDOUT
+        )
+    with open(PID_FILE, "w") as f:
+        f.write(str(proc.pid))
+    print(f"Sidecar started (PID {proc.pid})")
+
+
+def stop():
+    pid = get_pid()
+    if not pid or not is_running(pid):
+        print("Sidecar not running")
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+        return
+    os.kill(pid, signal.SIGTERM)
+    time.sleep(1)
+    os.remove(PID_FILE)
+    print(f"Sidecar stopped")
+
+
+def status():
+    pid = get_pid()
+    if pid and is_running(pid):
+        print(f"Sidecar running (PID {pid})")
+    else:
+        print("Sidecar not running")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: sidecarctl start|stop|status")
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+    if cmd == "start":
+        start()
+    elif cmd == "stop":
+        stop()
+    elif cmd == "status":
+        status()
+    else:
+        print(f"Unknown command: {cmd}")
+        sys.exit(1)

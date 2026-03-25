@@ -1,0 +1,86 @@
+# Standard Agent Team Reliable Workflow Template
+name: reliable-agent-team-workflow
+version: "1.0"
+description: Standard agent team reliable execution workflow with lead lease, outbox, and watchdog
+
+settings:
+  hang_timeout: 300        # seconds
+  ack_timeout: 120         # seconds
+  heartbeat_ttl: 30        # seconds
+  max_retries: 5          # max dispatch retries per event
+
+stages:
+  - id: stage_1_planning
+    name: Planning
+    owner: lead
+    instructions: |
+      分析任务需求，制定执行计划。
+      识别关键里程碑和依赖关系。
+    success_criteria:
+      - plan_document_created: true
+      - milestones_identified: true
+    failure_policy:
+      action: retry
+      max_attempts: 3
+      backoff: exponential
+    next:
+      - stage_2_dispatch
+
+  - id: stage_2_dispatch
+    name: Task Dispatch
+    owner: lead
+    instructions: |
+      将任务分配给 worker agents。
+      初始化每个 worker 的任务上下文。
+    success_criteria:
+      - workers_notified: true
+      - tasks_queued: true
+    failure_policy:
+      action: pause_and_wait
+      timeout: 600
+    next:
+      - stage_3_execution
+
+  - id: stage_3_execution
+    name: Parallel Execution
+    owner: workers
+    instructions: |
+      Workers 并行执行分配的任务。
+      每完成一个任务，写入 outbox。
+    success_criteria:
+      - all_tasks_completed: true
+    failure_policy:
+      action: partial_retry
+      affected_only: true
+    next:
+      - stage_4_aggregation
+
+  - id: stage_4_aggregation
+    name: Result Aggregation
+    owner: lead
+    instructions: |
+      收集并验证所有 worker 的完成事件。
+      汇总结果，生成最终输出。
+    success_criteria:
+      - all_events_acked: true
+      - output_generated: true
+    failure_policy:
+      action: deadlock_detection
+    next: []
+
+roles:
+  lead:
+    description: 主协调 agent，负责阶段推进和决策
+    max_consecutive_failures: 3
+  architect:
+    description: 架构设计 agent
+  executor:
+    description: 执行 agent，负责具体任务完成
+  verifier:
+    description: 验证 agent，负责结果验收
+
+failure_handling:
+  global:
+    max_total_retries: 10
+    deadlock_detection: true
+    dlq_on_exhaustion: true
